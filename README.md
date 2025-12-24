@@ -2,7 +2,7 @@
 
 **Version 1.0**  
 **Author:** Brian Benitez  
-**GitHub:** [github.com/Brianben95](https://github.com/Brianben95)
+**GitHub:** https://github.com/BBenitez95
 
 ---
 
