@@ -15,7 +15,7 @@ This R Shiny application performs time-frequency decomposition of surface electr
 
 ---
 
-## Critical Interpretive Framework
+## Interpretive Framework
 
 ### What This Tool Does (Reliably)
 
