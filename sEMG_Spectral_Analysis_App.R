@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 ################################################################################
 # sEMG Wavelet Spectral Analysis & PCA Decomposition
-# Version 1.0
+# Version 1.1
 ################################################################################
 # Author: Brian Benitez
 # GitHub: https://github.com/Brianben95
@@ -13,6 +13,8 @@ pacman::p_load(
   plotly, readxl, openxlsx, 
   data.table, signal, dplyr, nnls
 )
+
+options(shiny.maxRequestSize = 1024^3) # Added this to increase file read size
 
 # =============================================================================
 # CONSTANTS & CONFIGURATION
@@ -1081,9 +1083,7 @@ ui <- fluidPage(
   
   div(class = "title-panel",
       h2("sEMG Wavelet Spectral Analysis"),
-      div(class = "subtitle", "Signal Characterization Tool — von Tscharner Wavelet Transform & PCA Decomposition"),
-      div(style = "font-size: 10px; color: #6c757d; margin-top: 4px;", 
-          "Note: Spectral metrics describe signal characteristics, not motor unit or fiber type properties. See Documentation tab.")
+      div(class = "subtitle", "von Tscharner Wavelet Transform & PCA-Based Spectral Decomposition")
   ),
   
   tabsetPanel(
@@ -1190,15 +1190,12 @@ ui <- fluidPage(
                          # Export
                          wellPanel(
                            h4("Export Results"),
-                           fluidRow(
-                             column(6, textInput("wt_fname", "Output Filename", placeholder = "spectral_intensities")),
-                             column(6, selectInput("wt_norm", "Data Format",
-                                                   c("Raw Intensities" = "raw", 
-                                                     "Unit Area Normalized" = "unit", 
-                                                     "Total Intensity Normalized" = "subj_ti")))
-                           ),
+                           textInput("wt_fname", "Output Filename", placeholder = "spectral_intensities"),
+                           div(class = "info-panel", 
+                               "Exports instantaneous intensity (time × frequency) for each observation as separate sheets."),
                            checkboxInput("wt_drop", "Exclude First Wavelet (low-frequency noise)", TRUE),
                            checkboxInput("wt_summary", "Include Summary Sheet (Total Intensity & Mean Frequency)", TRUE),
+                           checkboxInput("wt_pca_format", "Include PCA-Ready Sheet (time-summed, frequencies × observations)", TRUE),
                            downloadButton("wt_download", "Download Excel", class = "btn-primary btn-block")
                          )
                )
@@ -1277,66 +1274,36 @@ ui <- fluidPage(
                       # --- Section 1: Introduction ---
                       div(class = "doc-section",
                           h5("1. Introduction"),
-                          p("This application implements the von Tscharner wavelet transform for surface 
+                          p("This application implements the von Tscharner wavelet (cauchy) transform for surface 
                electromyography (sEMG) spectral analysis, following the methodology described 
                in von Tscharner (2000). The wavelet-based intensity analysis provides 
                time-frequency decomposition optimized for the non-stationary characteristics 
                of myoelectric signals during dynamic muscle contraction."),
                           p("The analysis pipeline consists of two stages: (1) wavelet transformation of 
                individual sEMG recordings to obtain spectral intensity distributions, and 
-               (2) population-level Principal Component Analysis (PCA) to identify patterns of 
-               spectral variation and quantify where each observation falls along the primary 
-               axis of high-frequency versus low-frequency spectral content."),
-                          div(class = "doc-note", style = "background: #fff3cd; border-left: 4px solid #856404; padding: 12px; margin: 12px 0;",
-                              tags$strong("Important:"), " This tool performs ", tags$em("signal characterization:"), 
-                              "It describes the spectral content of sEMG recordings. The 'High' and 'Low' 
-                              frequency components refer to ", tags$strong("spectral characteristics of the signal"), 
-                              ", not to muscle fiber types or motor unit properties. See Section 2 for 
-                              critical interpretive guidance."
-                          )
+               (2) population-level Principle-Componant Analysis (PCA) decomposition to identify canonical spectral patterns 
+               and quantify the relative contributions of high-frequency and low-frequency 
+               spectral components within each observation.")
                       ),
                       
-                      # --- Section 2: Critical Interpretive Framework ---
+                      # --- Section 2: Theoretical Background ---
                       div(class = "doc-section",
-                          h5("2. Interpretive Framework"),
-                          div(class = "doc-note", style = "background: #fff3cd; border-left: 4px solid #856404; padding: 12px; margin: 12px 0;",
-                              tags$strong("Important:"), 
-                              " The relationship between sEMG spectral properties and underlying motor unit 
-                              characteristics remains an area of active scientific debate. Spectral metrics 
-                              should be interpreted as ", tags$em("signal characteristics"), " rather than 
-                              direct measurements of motor unit recruitment or fiber type composition."
-                          ),
-                          
-                          p(tags$strong("What this tool does (reliably):")),
+                          h5("2. Spectral Content of the sEMG Signal"),
+                          p("Surface EMG signals represent the superposition of motor unit action potentials 
+               (MUAPs) detected at the skin surface. The spectral content of this interference 
+               pattern is influenced by multiple factors including:"),
                           tags$ul(
-                            tags$li("Performs valid time-frequency decomposition of sEMG signals"),
-                            tags$li("Identifies patterns of spectral variation across a dataset"),
-                            tags$li("Quantifies spectral balance (high vs. low frequency content)"),
-                            tags$li("Tracks spectral shifts within subjects across conditions")
+                            tags$li("MUAP conduction velocity along muscle fibers"),
+                            tags$li("Distance between active fibers and recording electrodes"),
+                            tags$li("Tissue filtering properties of intervening subcutaneous layers"),
+                            tags$li("Motor unit firing rates and synchronization"),
+                            tags$li("Fiber membrane properties and action potential shape")
                           ),
-                          
-                          p(tags$strong("Appropriate applications:")),
-                          tags$ul(
-                            tags$li(tags$strong("Fatigue monitoring:"), " Spectral compression during sustained 
-                      contractions is an empirically robust phenomenon related to conduction velocity changes"),
-                            tags$li(tags$strong("Within-subject comparisons:"), " When electrode placement, 
-                      tissue properties, and geometry are controlled"),
-                            tags$li(tags$strong("Exploratory analysis:"), " Identifying spectral patterns 
-                      for further investigation"),
-                            tags$li(tags$strong("Signal quality assessment:"), " Detecting artifacts or noise")
-                          ),
-                          
-                          p(tags$strong("Recommended Terminology:")),
-                          tags$table(class = "doc-table",
-                                     tags$tr(tags$th("Instead of..."), tags$th("Use...")),
-                                     tags$tr(tags$td("Fast-twitch fiber contribution"), 
-                                             tags$td("High-frequency spectral content")),
-                                     tags$tr(tags$td("Slow-twitch fiber activation"), 
-                                             tags$td("Low-frequency spectral content")),
-                                     tags$tr(tags$td("Motor unit recruitment shift"), 
-                                             tags$td("Spectral centroid shift")),
-                                     tags$tr(tags$td("Fiber type composition"), 
-                                             tags$td("Spectral distribution"))
+                          div(class = "doc-note",
+                              tags$strong("Interpretive Caution:"), " While spectral shifts are often attributed 
+              to changes in motor unit recruitment, the relationship between sEMG spectral 
+              properties and underlying motor unit characteristics remains an area of active 
+              scientific debate (Farina et al., 2004; von Tscharner & Nigg, 2008)."
                           )
                       ),
                       
@@ -1435,13 +1402,20 @@ ui <- fluidPage(
                       div(class = "doc-section",
                           h5("8. Resolving Eigenvector Sign Ambiguity"),
                           p("Eigenvectors computed from eigendecomposition have an inherent ", 
-                            tags$em("sign ambiguity."), "Mathematically, if v is an eigenvector, 
-               then -v is equally valid."),
+                            tags$em("sign ambiguity"), " — mathematically, if v is an eigenvector, 
+               then -v is equally valid. This is analogous to choosing which direction 
+               to call 'north' on a map: the underlying structure is unchanged, but a 
+               consistent convention is needed for interpretation."),
                           p("This application resolves the ambiguity using the method of Bro, Acar & Kolda (2008). 
                For each principal component, the sign is chosen to maximize:"),
                           div(class = "formula", "S = Σ sign(score_j) × score_j²"),
-                          p("This weighs each observation's 'vote' by the squared magnitude of its projection, 
-               so observations with larger projections have more influence on the orientation.")
+                          p("This weights each observation's 'vote' by the squared magnitude of its projection, 
+               so observations with larger projections have more influence on the orientation. 
+               The same method is applied independently to both PC1 and PC2."),
+                          p("This orientation procedure does not change the mathematical relationships 
+               between observations — distances, angles, and variance explained remain 
+               identical. It simply establishes a consistent coordinate system that makes 
+               the theta angle and coefficient interpretations meaningful across datasets.")
                       ),
                       
                       # --- Section 9: Boundary Spectra ---
@@ -1455,15 +1429,10 @@ ui <- fluidPage(
                           div(class = "formula", "S = PC1 + a * PC2"),
                           p("where the boundary coefficients a_lo and a_hi are determined by the constraint 
                that S >= 0 for all frequencies. The resulting boundary spectra represent the 
-               extreme spectral shapes observed in the dataset—operationally labeled 
-               'low-frequency' and 'high-frequency' based on their spectral centroids."),
+               canonical 'low-frequency' and 'high-frequency' spectral shapes for the population."),
                           p("Cauchy wavelets are then fitted to these boundary spectra using nonlinear least 
                squares, yielding characteristic center frequencies and bandwidths for each 
-               spectral component."),
-                          div(class = "doc-note", style = "background: #fff3cd; border-left: 4px solid #856404; padding: 10px; margin: 10px 0;",
-                              tags$strong("Note:"), " These labels describe ", tags$em("signal characteristics"), 
-                              ", not muscle fiber types or motor unit properties."
-                          )
+               spectral component.")
                       ),
                       
                       # --- Section 10: NNLS Decomposition ---
@@ -1472,16 +1441,10 @@ ui <- fluidPage(
                           p("Each observation's spectrum is decomposed into contributions from the two fitted 
                wavelets using non-negative least squares (NNLS):"),
                           div(class = "formula", "S(f) = c_high * W_high(f) + c_low * W_low(f)"),
-                          p("The non-negativity constraint ensures that coefficients remain physically 
-               meaningful (spectral intensity cannot be negative). The coefficients are 
-               normalized to sum to 1, yielding the relative proportion of spectral content 
-               in the high-frequency versus low-frequency ranges."),
-                          div(class = "doc-note", style = "background: #e2e3e5; border-left: 4px solid #6c757d; padding: 10px; margin: 10px 0;",
-                              tags$strong("Interpretation:"), " The 'High' and 'Low' coefficients describe 
-                              where each spectrum falls along the axis of spectral variation identified 
-                              by PCA. They quantify ", tags$em("spectral balance"), ", not fiber type 
-                              composition or motor unit recruitment."
-                          )
+                          p("The non-negativity constraint ensures that coefficients represent physiologically 
+               meaningful contributions (a spectrum cannot have 'negative' energy from a 
+               frequency band). The coefficients are normalized to sum to 1, yielding the 
+               relative proportion of spectral content attributable to each component.")
                       ),
                       
                       # --- Section 11: Theta Angle ---
@@ -1490,20 +1453,20 @@ ui <- fluidPage(
                           p("The theta angle provides a single-value summary of each observation's position 
                in the PC1-PC2 plane:"),
                           div(class = "formula", "theta = atan2(PC1_score, PC2_score)"),
-                          p("Interpretation of theta (as a descriptive signal metric):"),
+                          p("Interpretation of theta:"),
                           tags$ul(
                             tags$li(tags$strong("Higher theta values"), " correspond to spectra with 
                       relatively greater low-frequency content."),
                             tags$li(tags$strong("Lower theta values"), " correspond to spectra with 
                       relatively greater high-frequency content."),
                             tags$li(tags$strong("Changes in theta"), " across conditions or over time 
-                      indicate shifts in the spectral balance of the recorded signal.")
+                      indicate shifts in the spectral balance between high and low frequency 
+                      populations.")
                           ),
-                          div(class = "doc-note", style = "background: #e2e3e5; border-left: 4px solid #6c757d; padding: 10px; margin: 10px 0;",
-                              "Theta describes ", tags$em("where a spectrum falls"), " along the primary 
-                              axis of variation. It is a descriptive metric of signal characteristics, 
-                              not a measure of underlying physiology."
-                          )
+                          p("The eigenvector sign ambiguity is resolved using Bro's method (see Section 8), 
+               which orients each PC based on the data structure. For properly structured 
+               spectral data, this naturally results in consistent theta interpretation 
+               across datasets.")
                       ),
                       
                       # --- Section 12: Quality Metrics ---
@@ -1531,16 +1494,17 @@ ui <- fluidPage(
                                       tags$li("Load Excel file with one sheet per observation (time in column 1, 
                           signal in column 2)"),
                                       tags$li("Verify sample rate matches your acquisition settings"),
-                                      tags$li("OPTIONAL: Apply bandpass filtering (10-500 Hz typical for sEMG)"),
+                                      tags$li("Apply bandpass filtering (10-500 Hz typical for sEMG)"),
                                       tags$li("Set analysis window offset and length as needed"),
                                       tags$li("Run transform and verify spectra appear reasonable"),
-                                      tags$li("Export spectral intensities (Raw recommended for PCA)")
+                                      tags$li("Export results — each observation gets a time×frequency sheet; 
+                          enable 'PCA-Ready Sheet' for downstream PCA analysis")
                                     )
                             ),
                             tags$li(tags$strong("PCA & Decomposition Tab:"),
                                     tags$ul(
-                                      tags$li("Load exported spectral intensities file"),
-                                      tags$li("Run PCA - verify variance explained is adequate (>95%)"),
+                                      tags$li("Load the 'PCA_Ready' sheet from exported file (or any frequencies×observations matrix)"),
+                                      tags$li("Run PCA — verify variance explained is adequate (>95%)"),
                                       tags$li("Run wavelet fitting and NNLS decomposition"),
                                       tags$li("Check quality metrics in status panel"),
                                       tags$li("Export results for further statistical analysis")
@@ -1556,20 +1520,29 @@ ui <- fluidPage(
                           tags$table(class = "doc-table",
                                      tags$tr(tags$th("Sheet"), tags$th("Contents")),
                                      tags$tr(
-                                       tags$td("Spectral_Intensities"),
-                                       tags$td("Matrix of spectral intensities. First column contains center frequencies 
-                        (Hz). Each subsequent column represents one observation, with values 
-                        corresponding to wavelet intensity at each frequency band. Format 
-                        (raw/normalized) depends on export settings.")
+                                       tags$td("[Observation Name]"),
+                                       tags$td(HTML("One sheet per observation containing the instantaneous spectral 
+                        intensity matrix (time &times; frequency):<br>
+                        &bull; <b>Time_s</b>: Time in seconds from start of analysis window<br>
+                        &bull; <b>[fc]_Hz</b>: One column per wavelet band, labeled by center 
+                        frequency. Values are instantaneous intensity at each time point."))
                                      ),
                                      tags$tr(
                                        tags$td("Summary"),
                                        tags$td(HTML("Per-observation summary metrics:<br>
                         &bull; <b>Observation</b>: Name identifier<br>
                         &bull; <b>Total_Intensity</b>: Sum of spectral intensities across all 
-                        frequency bands (proportional to signal power)<br>
+                        time points and frequency bands (proportional to signal energy)<br>
                         &bull; <b>Mean_Frequency_Hz</b>: Intensity-weighted mean frequency, 
                         calculated as &Sigma;(f<sub>c</sub> &times; I) / &Sigma;(I)"))
+                                     ),
+                                     tags$tr(
+                                       tags$td("PCA_Ready"),
+                                       tags$td(HTML("Time-summed spectral intensities in frequencies &times; observations format, 
+                        ready for loading into the PCA tab:<br>
+                        &bull; <b>Frequency_Hz</b>: Center frequencies of each wavelet band<br>
+                        &bull; <b>[Observation]</b>: One column per observation with total intensity 
+                        (summed across time) at each frequency band."))
                                      )
                           ),
                           tags$br(),
@@ -1588,8 +1561,7 @@ ui <- fluidPage(
                         &bull; <b>Observation</b>: Name identifier<br>
                         &bull; <b>Condition</b>: Extracted condition label<br>
                         &bull; <b>Theta_rad</b>: Angle in PC space (radians). Higher values 
-                        indicate relatively greater low-frequency spectral content. This is a 
-                        descriptive signal metric, not a physiological measurement."))
+                        indicate relatively greater low-frequency content."))
                                      ),
                                      tags$tr(
                                        tags$td("Wavelet_Parameters"),
@@ -1603,10 +1575,9 @@ ui <- fluidPage(
                                      ),
                                      tags$tr(
                                        tags$td("Coefficients"),
-                                       tags$td("NNLS decomposition coefficients for each observation. 'High' and 'Low' 
+                                       tags$td("NNLS decomposition coefficients for each observation. High and Low 
                         columns represent the relative contribution (0-1) of high-frequency 
-                        and low-frequency spectral components. These describe SPECTRAL BALANCE 
-                        of the signal, not fiber type composition. Values sum to 1 for each 
+                        and low-frequency spectral components. These sum to 1 for each 
                         observation.")
                                      ),
                                      tags$tr(
@@ -1631,97 +1602,49 @@ ui <- fluidPage(
                       
                       # --- Section 15: Limitations ---
                       div(class = "doc-section",
-                          h5("15. Limitations and Considerations"),
-                          
-                          p(tags$strong("Methodological Considerations:")),
+                          h5("15. Limitations and Caveats"),
                           tags$ul(
-                            tags$li(tags$strong("Cross-subject variability:"), " Electrode placement, subcutaneous 
-                      tissue thickness, and muscle geometry differ between individuals. Cross-subject 
-                      comparisons should use appropriate statistical modeling and be interpreted 
-                      with caution."),
-                            tags$li(tags$strong("Volume conductor effects:"), " The same motor unit activity can 
-                      produce different spectral signatures depending on electrode position 
-                      relative to active fibers."),
-                            tags$li(tags$strong("Two-component assumption:"), " Spectral variation may be more 
-                      complex than a single high-low axis. Check S_rec variance to verify."),
-                            tags$li(tags$strong("Stationarity:"), " Analysis assumes relatively stable muscle 
-                      activation within the analysis window."),
-                            tags$li(tags$strong("Parameter sensitivity:"), " Default wavelet parameters are 
+                            tags$li("Spectral content is influenced by electrode placement, subcutaneous 
+                      tissue thickness, and skin impedance. Cross-subject comparisons should 
+                      be interpreted with caution."),
+                            tags$li("The relationship between spectral features and underlying motor unit 
+                      properties is indirect and confounded by volume conduction effects."),
+                            tags$li("The two-component decomposition assumes that spectral variation can 
+                      be adequately described by a single axis of variation (high vs. low 
+                      frequency). More complex spectral patterns may require additional 
+                      components."),
+                            tags$li("Results are sensitive to bandpass filter settings. Consistent 
+                      preprocessing is essential for valid comparisons."),
+                            tags$li("The default wavelet parameters (J=11, q=1.45, r=1.959, scale=0.3) are 
                       optimized for human locomotion studies. Other applications may benefit 
-                      from adjustment.")
-                          ),
-                          
-                          p(tags$strong("Interpretive Considerations:")),
-                          tags$ul(
-                            tags$li(tags$strong("Signal vs. source:"), " This tool characterizes the ", 
-                                    tags$em("signal"), "; spectral features are influenced by multiple 
-                      factors beyond motor unit properties alone."),
-                            tags$li(tags$strong("Causal attribution:"), " Spectral shifts could reflect 
-                      changes in conduction velocity, discharge rate modulation, 
-                      technical factors, or combinations thereof."),
-                            tags$li(tags$strong("Appropriate framing:"), " Report results as spectral 
-                      characteristics rather than direct physiological measurements.")
-                          ),
-                          
-                          p(tags$strong("Recommended Practices:")),
-                          tags$ul(
-                            tags$li("Use within-subject designs when possible"),
-                            tags$li("Report spectral features descriptively"),
-                            tags$li("Consider as one component of a multi-method approach"),
-                            tags$li("Acknowledge the ongoing scientific debate in publications")
+                      from parameter adjustment.")
                           )
                       ),
                       
                       # --- Section 16: References ---
                       div(class = "doc-section",
                           h5("16. References"),
-                          
-                          p(tags$strong("Primary Methodological Source:")),
                           div(class = "reference", 
-                              "[1] von Tscharner, V. (2000). Intensity analysis in time-frequency space of surface 
-                              myoelectric signals by wavelets of specified resolution. Journal of 
-                              Electromyography and Kinesiology, 10(6), 433-445."),
-                          
-                          p(tags$strong("Reviews on EMG Signal Interpretation:"), style = "margin-top: 15px;"),
-                          div(class = "reference",
-                              "[2] Farina, D., Merletti, R., & Enoka, R. M. (2014). The extraction of neural 
-                              strategies from the surface EMG: an update. Journal of Applied Physiology, 
-                              117(11), 1215-1230."),
+                              "[1] von Tscharner V. (2000) Intensity analysis in time-frequency space of 
+                surface myoelectric signals by wavelets of specified resolution. 
+                J Electromyogr Kinesiol, 10(6):433-445."),
                           div(class = "reference", 
-                              "[3] Farina, D., Merletti, R., & Enoka, R. M. (2004). The extraction of neural 
-                              strategies from the surface EMG. Journal of Applied Physiology, 96(4), 1486-1495."),
+                              "[2] von Tscharner V. (2009) Spherical classification of wavelet transformed 
+                EMG intensity patterns. J Electromyogr Kinesiol, 19(5):e334-44."),
                           div(class = "reference", 
-                              "[4] Enoka, R. M., & Duchateau, J. (2015). Inappropriate interpretation of surface 
-                              EMG signals and muscle fiber characteristics impedes understanding of the control 
-                              of neuromuscular function. Journal of Applied Physiology, 119(12), 1516-1518."),
-                          
-                          p(tags$strong("The Point-Counterpoint Debate:"), style = "margin-top: 15px;"),
+                              "[3] von Tscharner V, Goepfert B. (2006) Estimation of the interplay between 
+                groups of fast and slow muscle fibers of the tibialis anterior and 
+                gastrocnemius muscle while running. J Electromyogr Kinesiol, 16(2):188-197."),
                           div(class = "reference", 
-                              "[5] von Tscharner, V., & Nigg, B. M. (2008). Point: Spectral properties of the surface 
-                              EMG can characterize motor unit recruitment strategies and muscle fiber type. 
-                              Journal of Applied Physiology, 105(5), 1671-1673."),
+                              "[4] Wakeling JM, Rozitis AI. (2004) Spectral properties of myoelectric signals 
+                from different motor units in the leg extensor muscles. 
+                J Exp Biol, 207(14):2519-2528."),
                           div(class = "reference", 
-                              "[6] Farina, D. (2008). Counterpoint: Spectral properties of the surface EMG do not 
-                              provide information about motor unit recruitment and muscle fiber type. 
-                              Journal of Applied Physiology, 105(5), 1673-1674."),
+                              "[5] Farina D, Merletti R, Enoka RM. (2004) The extraction of neural strategies 
+                from the surface EMG. J Appl Physiol, 96(4):1486-1495."),
                           div(class = "reference", 
-                              "[7] von Tscharner, V., & Nigg, B. M. (2008). Last word on point:counterpoint: spectral 
-                              properties of the surface EMG can characterize/do not provide information about 
-                              motor unit recruitment strategies and muscle fiber type. Journal of Applied Physiology."),
-                          
-                          p(tags$strong("Additional Methodological References:"), style = "margin-top: 15px;"),
-                          div(class = "reference", 
-                              "[8] von Tscharner, V., & Goepfert, B. (2006). Estimation of the interplay between 
-                              groups of fast and slow muscle fibers of the tibialis anterior and 
-                              gastrocnemius muscle while running. J Electromyogr Kinesiol, 16(2), 188-197."),
-                          div(class = "reference", 
-                              "[9] Bro, R., Acar, E., & Kolda, T. G. (2008). Resolving the sign ambiguity in the 
-                              singular value decomposition. Journal of Chemometrics, 22(2), 135-140."),
-                          div(class = "reference", 
-                              "[10] Wakeling, J. M., Pascual, S. A., Nigg, B. M., & von Tscharner, V. (2001). Surface 
-                              EMG shows distinct populations of muscle activity when measured during sustained 
-                              sub-maximal exercise. European Journal of Applied Physiology, 86(1), 40-47."),
-                          
+                              "[6] Bro R, Acar E, Kolda TG. (2008) Resolving the sign ambiguity in the 
+                singular value decomposition. J Chemometrics, 22:135-140."),
                           tags$hr(),
                           p(style = "font-size: 11px; color: #6c757d;", 
                             "Author: Brian Benitez | ",
@@ -1886,9 +1809,11 @@ server <- function(input, output, session) {
             apply_gauss = TRUE  # Always apply Gaussian equalizer per von Tscharner
           )
           
-          # Store segment info for visualization
+          # Store segment info for visualization and time reconstruction
           result$segment_start <- t_start
           result$segment_end <- t_end
+          result$fs <- input$wt_fs
+          result$n_samples <- nrow(result$powc)
           
           wt$results[[names(wt$data)[i]]] <- result
         }
@@ -2102,49 +2027,58 @@ server <- function(input, output, session) {
     content = function(file) {
       req(length(wt$results) > 0)
       
-      # Build spectral data frame
-      fc <- wt$results[[1]]$freqc
-      fc_full <- fc  # Keep full frequencies for mean frequency calculation
-      if (input$wt_drop && length(fc) > 1) fc <- fc[-1]
+      wb <- openxlsx::createWorkbook()
       
-      df_out <- data.frame(Frequency_Hz = fc)
+      # Get frequency labels
+      fc <- wt$results[[1]]$freqc
+      fc_full <- fc
+      if (input$wt_drop && length(fc) > 1) fc <- fc[-1]
       
       # Summary metrics storage
       obs_names <- c()
       total_intensities <- c()
       mean_frequencies <- c()
       
+      # Create one sheet per observation with time x frequency data
       for (name in names(wt$results)) {
-        spec_full <- wt$results[[name]]$powspec
-        spec <- spec_full
-        if (input$wt_drop && length(spec) > 1) spec <- spec[-1]
+        res <- wt$results[[name]]
         
-        # Compute summary metrics (using full spectrum or trimmed based on setting)
+        # Get the full time x frequency matrix
+        powc <- res$powc
+        
+        # Drop first wavelet if requested
+        if (input$wt_drop && ncol(powc) > 1) {
+          powc <- powc[, -1, drop = FALSE]
+        }
+        
+        # Create time vector
+        n_samples <- nrow(powc)
+        time_vec <- seq(0, (n_samples - 1) / res$fs, length.out = n_samples)
+        
+        # Build data frame: Time + intensity at each frequency
+        df_obs <- data.frame(Time_s = time_vec)
+        for (j in seq_along(fc)) {
+          col_name <- sprintf("%.1f_Hz", fc[j])
+          df_obs[[col_name]] <- powc[, j]
+        }
+        
+        # Compute summary metrics (sum across time for each frequency, then across frequencies)
         fc_calc <- if (input$wt_drop && length(fc_full) > 1) fc_full[-1] else fc_full
-        spec_calc <- if (input$wt_drop && length(spec_full) > 1) spec_full[-1] else spec_full
-        
-        ti <- sum(spec_calc)
-        mnf <- if (ti > 0) sum(fc_calc * spec_calc) / ti else NA
+        spec_summed <- colSums(powc)  # Sum across time for each frequency
+        ti <- sum(spec_summed)
+        mnf <- if (ti > 0) sum(fc_calc * spec_summed) / ti else NA
         
         obs_names <- c(obs_names, name)
         total_intensities <- c(total_intensities, ti)
         mean_frequencies <- c(mean_frequencies, mnf)
         
-        # Apply normalization for spectral output
-        if (input$wt_norm == "unit") {
-          spec <- spec / sum(spec)
-        }
-        
-        df_out[[name]] <- spec
+        # Add sheet for this observation
+        sheet_name <- substr(name, 1, 31)  # Excel sheet name limit
+        openxlsx::addWorksheet(wb, sheet_name)
+        openxlsx::writeData(wb, sheet_name, df_obs)
       }
       
-      wb <- openxlsx::createWorkbook()
-      
-      # Sheet 1: Spectral Intensities
-      openxlsx::addWorksheet(wb, "Spectral_Intensities")
-      openxlsx::writeData(wb, "Spectral_Intensities", df_out)
-      
-      # Sheet 2: Summary metrics (if requested)
+      # Summary sheet (if requested)
       if (input$wt_summary) {
         summary_df <- data.frame(
           Observation = obs_names,
@@ -2153,6 +2087,27 @@ server <- function(input, output, session) {
         )
         openxlsx::addWorksheet(wb, "Summary")
         openxlsx::writeData(wb, "Summary", summary_df)
+      }
+      
+      # PCA-ready sheet (time-summed, frequencies x observations)
+      if (input$wt_pca_format) {
+        pca_df <- data.frame(Frequency_Hz = fc)
+        
+        for (name in names(wt$results)) {
+          res <- wt$results[[name]]
+          powc <- res$powc
+          
+          # Drop first wavelet if requested
+          if (input$wt_drop && ncol(powc) > 1) {
+            powc <- powc[, -1, drop = FALSE]
+          }
+          
+          # Sum across time to get spectrum
+          pca_df[[name]] <- colSums(powc)
+        }
+        
+        openxlsx::addWorksheet(wb, "PCA_Ready")
+        openxlsx::writeData(wb, "PCA_Ready", pca_df)
       }
       
       openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
